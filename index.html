@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#10202b">
+  <meta name="description" content="SmartMap is an interactive map prototype with location search, nearby places, weather and customizable map styles.">
+  <title>SmartMap — Explore the world</title>
+  <link rel="preconnect" href="https://unpkg.com">
+  <link rel="preconnect" href="https://tile.openstreetmap.org">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/weather.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <main id="app">
+    <div id="map" aria-label="Interactive map"></div>
+    <canvas id="weather-canvas" aria-hidden="true"></canvas>
+    <div class="map-vignette" aria-hidden="true"></div>
+
+    <header class="topbar glass">
+      <a class="brand" href="#" aria-label="SmartMap home" onclick="event.preventDefault(); location.hash=''; location.reload();">
+        <span class="brand-mark"><i class="fa-solid fa-compass"></i></span>
+        <span class="brand-name">Smart<span>Map</span><small>EXPLORE WITHOUT LIMITS</small></span>
+      </a>
+      <button id="menu-toggle" class="mobile-menu" type="button" aria-label="Open menu"><i class="fa-solid fa-bars"></i></button>
+      <form id="search-form" class="search-form" role="search" autocomplete="off">
+        <i class="fa-solid fa-magnifying-glass search-icon"></i>
+        <input id="search-input" name="location" type="search" placeholder="Search places, streets or coordinates…" aria-label="Search locations" minlength="1" required>
+        <button class="search-submit" type="submit" aria-label="Search"><i class="fa-solid fa-arrow-right"></i></button>
+        <div id="search-suggestions" class="suggestions hidden" role="listbox" aria-label="Location suggestions"></div>
+      </form>
+      <div class="top-actions">
+        <button id="weather-toggle" class="top-action" type="button"><i class="fa-solid fa-cloud-sun"></i><span data-i18n="weather">Weather</span></button>
+        <button id="locate-button" class="top-action" type="button"><i class="fa-solid fa-location-crosshairs"></i><span>My location</span></button>
+      </div>
+    </header>
+
+    <aside id="sidebar" class="sidebar glass" aria-label="Map tools">
+      <div class="sidebar-heading">
+        <div><div class="eyebrow" data-i18n="discover">DISCOVER</div><h1 data-i18n="exploreMap">Explore map</h1></div>
+        <button id="sidebar-close" class="icon-button small-only" type="button" aria-label="Close menu"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <nav class="main-nav" aria-label="Main tools">
+        <button class="nav-item active" type="button" data-panel="explore"><span class="nav-icon"><i class="fa-regular fa-compass"></i></span><span data-i18n="explore">Explore</span><i class="fa-solid fa-chevron-right nav-chevron"></i></button>
+        <button class="nav-item" type="button" data-panel="places"><span class="nav-icon"><i class="fa-solid fa-location-dot"></i></span><span data-i18n="nearbyPlaces">Nearby places</span><i class="fa-solid fa-chevron-right nav-chevron"></i></button>
+        <button class="nav-item" type="button" data-panel="layers"><span class="nav-icon"><i class="fa-solid fa-layer-group"></i></span><span data-i18n="mapLayers">Map layers</span><i class="fa-solid fa-chevron-right nav-chevron"></i></button>
+        <button class="nav-item" type="button" data-panel="weather"><span class="nav-icon"><i class="fa-solid fa-cloud-sun-rain"></i></span><span data-i18n="weather">Weather</span><i class="fa-solid fa-chevron-right nav-chevron"></i></button>
+      </nav>
+
+      <section class="sidebar-section">
+        <div class="section-title"><span data-i18n="quickExplore">QUICK EXPLORE</span><button id="clear-pois" class="text-button" type="button" data-i18n="clear">Clear</button></div>
+        <div class="category-grid">
+          <button class="category-chip" type="button" data-category="hospital"><i class="fa-solid fa-kit-medical"></i><span data-i18n="hospitals">Hospitals</span></button>
+          <button class="category-chip" type="button" data-category="restaurant"><i class="fa-solid fa-utensils"></i><span data-i18n="food">Food</span></button>
+          <button class="category-chip" type="button" data-category="school"><i class="fa-solid fa-graduation-cap"></i><span data-i18n="schools">Schools</span></button>
+          <button class="category-chip" type="button" data-category="fuel"><i class="fa-solid fa-gas-pump"></i><span data-i18n="fuel">Fuel</span></button>
+          <button class="category-chip" type="button" data-category="tourism"><i class="fa-solid fa-camera"></i><span data-i18n="tourism">Tourism</span></button>
+          <button class="category-chip" type="button" data-category="park"><i class="fa-solid fa-tree"></i><span data-i18n="parks">Parks</span></button>
+        </div>
+        <p id="poi-status" class="muted status-line" aria-live="polite">Choose a category to find places nearby.</p>
+      </section>
+
+      <section class="sidebar-section settings-section">
+        <div class="section-title"><span data-i18n="preferences">PREFERENCES</span></div>
+        <label class="setting-row" for="ui-language"><span><i class="fa-solid fa-language"></i><span data-i18n="interfaceLanguage">Interface language</span></span>
+          <select id="ui-language"><option value="en">English</option><option value="hi">हिन्दी</option><option value="ml">മലയാളം</option></select>
+        </label>
+        <label class="setting-row" for="label-language"><span><i class="fa-solid fa-font"></i><span data-i18n="mapLabels">Map labels</span></span>
+          <select id="label-language"><option value="local">Local names</option><option value="en">English names</option></select>
+        </label>
+        <label class="setting-row" for="map-style"><span><i class="fa-solid fa-map"></i><span>Map style</span></span>
+          <select id="map-style"><option value="standard">Standard</option><option value="voyager">Voyager</option><option value="dark">Dark</option></select>
+        </label>
+        <label class="setting-row" for="motion-toggle"><span><i class="fa-solid fa-wand-magic-sparkles"></i><span data-i18n="smoothMotion">Smooth motion</span></span><input id="motion-toggle" type="checkbox" checked></label>
+      </section>
+
+      <footer class="sidebar-footer">
+        <div class="footer-links">
+          <a href="https://www.openstreetmap.org/traces" target="_blank" rel="noopener">GPS Tracks</a>
+          <a href="https://www.openstreetmap.org/diary" target="_blank" rel="noopener">User Diaries</a>
+          <a href="https://www.openstreetmap.org/communities" target="_blank" rel="noopener">Communities</a>
+          <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">Copyright</a>
+          <a href="https://www.openstreetmap.org/help" target="_blank" rel="noopener">Help</a>
+          <a href="https://www.openstreetmap.org/about" target="_blank" rel="noopener">About</a>
+        </div>
+      </footer>
+    </aside>
+
+    <div class="map-controls glass" aria-label="Map controls">
+      <button id="zoom-in" class="control-button" type="button" aria-label="Zoom in" title="Zoom in"><i class="fa-solid fa-plus"></i></button>
+      <button id="zoom-out" class="control-button" type="button" aria-label="Zoom out" title="Zoom out"><i class="fa-solid fa-minus"></i></button>
+      <span class="control-divider"></span>
+      <button id="reset-view" class="control-button" type="button" aria-label="Reset map view" title="Reset view"><i class="fa-solid fa-earth-americas"></i></button>
+      <button id="compass-button" class="control-button" type="button" aria-label="Compass" title="Orientation"><i class="fa-regular fa-compass"></i></button>
+    </div>
+
+    <section id="weather-card" class="weather-card glass hidden" aria-label="Local weather">
+      <div class="panel-heading"><div><div class="eyebrow" data-i18n="localWeather">LOCAL WEATHER</div><h2 id="weather-place">Map centre</h2></div><button id="weather-close" class="icon-button" type="button" aria-label="Close weather"><i class="fa-solid fa-xmark"></i></button></div>
+      <div class="weather-main"><i id="weather-icon" class="fa-solid fa-cloud-sun"></i><div><strong id="weather-temperature">--°</strong><span id="weather-description">Loading conditions…</span></div></div>
+      <div class="weather-metrics">
+        <div><i class="fa-solid fa-wind"></i><span>Wind speed</span><strong id="weather-wind">-- km/h</strong></div>
+        <div><i class="fa-solid fa-cloud-rain"></i><span>Precipitation</span><strong id="weather-rain">-- mm</strong></div>
+        <div><i class="fa-regular fa-compass"></i><span>Wind direction</span><strong id="weather-direction">--°</strong></div>
+      </div>
+      <div class="weather-effects"><button class="effect-button active" type="button" data-weather-effect="off"><i class="fa-solid fa-ban"></i>Off</button><button class="effect-button" type="button" data-weather-effect="wind"><i class="fa-solid fa-wind"></i>Wind</button><button class="effect-button" type="button" data-weather-effect="rain"><i class="fa-solid fa-cloud-rain"></i>Rain</button></div>
+      <p id="weather-note" class="muted">Weather information appears here.</p>
+    </section>
+
+    <section id="place-card" class="place-card glass hidden" aria-live="polite">
+      <div class="panel-heading"><div class="eyebrow" data-i18n="selectedLocation">SELECTED LOCATION</div><button id="place-close" class="icon-button" type="button" aria-label="Close place details"><i class="fa-solid fa-xmark"></i></button></div>
+      <h2 id="place-name">Selected location</h2>
+      <p id="place-address" class="place-address">Address information</p>
+      <div class="coordinates"><i class="fa-solid fa-location-crosshairs"></i><span id="place-coordinates">0.00000, 0.00000</span><button id="copy-coordinates" class="icon-button" type="button" aria-label="Copy coordinates" title="Copy coordinates"><i class="fa-regular fa-copy"></i></button></div>
+      <p id="place-feedback" class="feedback" aria-live="polite"></p>
+      <div class="place-actions"><button id="share-place" class="primary-button" type="button"><i class="fa-solid fa-share-nodes"></i><span data-i18n="share">Share</span></button><button id="copy-link" class="secondary-button" type="button"><i class="fa-solid fa-link"></i><span data-i18n="copyLink">Copy map link</span></button></div>
+    </section>
+
+    <div id="loading-indicator" class="loading-indicator glass hidden" role="status" aria-live="polite"><span class="spinner"></span><span id="loading-text">Loading…</span></div>
+    <div id="toast" class="toast glass" role="status" aria-live="polite"></div>
+    <div class="attribution-note">Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a></div>
+  </main>
+</body>
+</html>
