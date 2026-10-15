@@ -71,7 +71,7 @@ export function initUI(showToast, setLoading) {
       } else if (panel === "layers") {
         document.querySelector("#map-style").focus();
         document.querySelector("#map-style").scrollIntoView({ block: "nearest", behavior: "smooth" });
-        showToast("Choose Standard, Voyager or Dark under Preferences.");
+        showToast("Choose a map style under Preferences. The map will reload in that style.");
       } else if (panel === "places") {
         document.querySelector("[data-category='restaurant']").scrollIntoView({ block: "nearest", behavior: "smooth" });
         showToast("Choose a category under Quick Explore.");
@@ -91,8 +91,8 @@ export function initUI(showToast, setLoading) {
     localStorage.setItem("smartmap-label-language", event.target.value);
     setLabelPreference(event.target.value);
     showToast(event.target.value === "en"
-      ? "English preference saved for place names. Base map tile labels may remain multilingual."
-      : "Local-name preference saved.");
+      ? "English-first map labels enabled. Some places may still use local names when English data is unavailable."
+      : "Local map labels enabled.");
   });
   document.querySelector("#map-style").addEventListener("change", event => {
     setMapLayer(event.target.value);
@@ -131,7 +131,7 @@ export function initUI(showToast, setLoading) {
   document.querySelector("#menu-toggle").addEventListener("click", () => document.querySelector("#sidebar").classList.toggle("open"));
   document.querySelector("#sidebar-close").addEventListener("click", closeMobileSidebar);
   document.querySelector("#map").addEventListener("contextmenu", event => {
-    // Leaflet handles map gestures. Prevent the browser menu on the map surface.
+    // MapLibre handles map gestures. Prevent the browser menu on the map surface.
     event.preventDefault();
     showToast("Click the map to select a location and view its coordinates.");
   });
@@ -140,7 +140,7 @@ export function initUI(showToast, setLoading) {
   window.addEventListener("smartmap:toast", event => showToast(event.detail));
   window.addEventListener("resize", () => {
     const map = getMap();
-    if (map) setTimeout(() => map.invalidateSize(), 100);
+    if (map) setTimeout(() => map.resize(), 100);
   });
 
   const savedLanguage = localStorage.getItem("smartmap-ui-language") || "en";

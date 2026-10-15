@@ -1,137 +1,180 @@
-const DEFAULT_CENTER = [20.5937, 78.9629];
+const DEFAULT_CENTER = [78.9629, 20.5937]; // MapLibre uses [longitude, latitude].
 
 let map;
-let baseLayer;
-let labelsLayer;
-let activeBaseLayer;
-let poiLayer;
-let userMarker;
-let selectedMarker;
+let poiMarkers = [];
+let userMarker = null;
+let selectedMarker = null;
 let smoothMotion = true;
+let labelPreference = localStorage.getItem("smartmap-label-language") || "local";
+let activeStyle = "standard";
+
+const MAP_STYLES = {
+  standard: {
+    url: "https://tiles.openfreemap.org/styles/liberty",
+    label: "Standard"
+  },
+  voyager: {
+    url: "https://tiles.openfreemap.org/styles/bright",
+    label: "Voyager"
+  },
+  light: {
+    url: "https://tiles.openfreemap.org/styles/positron",
+    label: "Light"
+  },
+  dark: {
+    url: "https://tiles.openfreemap.org/styles/dark",
+    label: "Dark"
+  }
+};
 
 export function initMap() {
-  map = L.map("map", {
-    zoomControl: false,
-    preferCanvas: true,
-    zoomAnimation: true,
-    fadeAnimation: true,
-    markerZoomAnimation: true,
-    wheelPxPerZoomLevel: 90
-  }).setView(DEFAULT_CENTER, 5);
+  map = new maplibregl.Map({
+    container: "map",
+    style: MAP_STYLES[activeStyle].url,
+    center: DEFAULT_CENTER,
+    zoom: 5,
+    minZoom: 2,
+    maxZoom: 20,
+    attributionControl: true,
+    cooperativeGestures: false,
+    pitchWithRotate: true,
+    dragRotate: true,
+    touchPitch: true
+  });
 
-  baseLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>'
-  }).addTo(map);
-  activeBaseLayer = baseLayer;
+  map.on("load", () => {
+    applyLabelPreference();
+    map.resize();
+  });
+  map.on("style.load", applyLabelPreference);
+  map.on("error", event => {
+    const message = event?.error?.message || "Map resources could not be loaded.";
+    console.warn("SmartMap map resource error:", message);
+    window.dispatchEvent(new CustomEvent("smartmap:maperror", { detail: message }));
+  });
 
-  poiLayer = L.layerGroup().addTo(map);
-  map.on("click", (event) => {
-    const { lat, lng } = event.latlng;
+  map.on("click", event => {
+    const { lat, lng } = event.lngLat;
     showSelectedCoordinates(lat, lng);
   });
-
   map.on("moveend", () => {
+    const center = map.getCenter();
     window.dispatchEvent(new CustomEvent("smartmap:mapmove", {
-      detail: { center: map.getCenter(), zoom: map.getZoom(), bounds: map.getBounds() }
+      detail: { center, zoom: map.getZoom(), bounds: map.getBounds() }
     }));
   });
-
   map.on("zoomend", () => {
     window.dispatchEvent(new CustomEvent("smartmap:zoom", { detail: map.getZoom() }));
   });
-
-  setTimeout(() => map.invalidateSize(), 100);
+  map.on("rotateend", () => {
+    window.dispatchEvent(new CustomEvent("smartmap:rotation", { detail: map.getBearing() }));
+  });
   return map;
 }
 
 export function getMap() { return map; }
-export function getPoiLayer() { return poiLayer; }
+export function getPoiLayer() { return poiMarkers; }
 
 export function flyToLocation(lat, lon, zoom = 15) {
   if (!map) return;
+  const options = { center: [Number(lon), Number(lat)], zoom, essential: true };
   if (smoothMotion && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-    map.flyTo([lat, lon], zoom, { duration: 1.25, easeLinearity: 0.25 });
+    map.flyTo({ ...options, speed: 1.25, curve: 1.35 });
   } else {
-    map.setView([lat, lon], zoom);
+    map.jumpTo(options);
   }
 }
 
 export function setSmoothMotion(enabled) {
   smoothMotion = enabled;
   document.body.classList.toggle("reduce-motion", !enabled);
-  if (map) {
-    map.options.zoomAnimation = enabled;
-    map.options.fadeAnimation = enabled;
-    map.options.markerZoomAnimation = enabled;
-  }
 }
 
 export function setLabelPreference(preference) {
-  if (!map) return;
-  if (labelsLayer) map.removeLayer(labelsLayer);
-  labelsLayer = null;
-  // OSM's standard tile layer renders labels from its tile style. This preference
-  // affects selected place names in the UI; a separate label-only tile service
-  // would be needed to globally switch every map label.
-  window.dispatchEvent(new CustomEvent("smartmap:labels", { detail: preference }));
+  labelPreference = preference === "en" ? "en" : "local";
+  if (map && map.isStyleLoaded()) applyLabelPreference();
+  window.dispatchEvent(new CustomEvent("smartmap:labels", { detail: labelPreference }));
+}
+
+function applyLabelPreference() {
+  if (!map || !map.isStyleLoaded()) return;
+  const layers = map.getStyle()?.layers || [];
+  for (const layer of layers) {
+    if (layer.type !== "symbol" || !layer.layout?.["text-field"]) continue;
+    // Leave road shields and other non-name text (for example route numbers) untouched.
+    if (!JSON.stringify(layer.layout["text-field"]).toLowerCase().includes("name")) continue;
+    if (labelPreference === "en") {
+      // Prefer English, then a Latin-script transliteration, then the original name.
+      map.setLayoutProperty(layer.id, "text-field", [
+        "coalesce",
+        ["get", "name:en"],
+        ["get", "name:latin"],
+        ["get", "name"]
+      ]);
+    } else {
+      // Restore the style's original label expression, which normally uses local names.
+      const original = layer.metadata?.["smartmap:original-text-field"];
+      if (original) map.setLayoutProperty(layer.id, "text-field", original);
+      else map.setLayoutProperty(layer.id, "text-field", ["coalesce", ["get", "name"], ["get", "name:en"], ["get", "name:latin"]]);
+    }
+  }
 }
 
 export function setMapLayer(layerName) {
-  if (!map) return;
-  const sources = {
-    standard: {
-      url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-      options: { maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>' }
-    },
-    voyager: {
-      url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
-      options: { maxZoom: 20, subdomains: "abcd", attribution: '&copy; OpenStreetMap contributors &copy; <a href="https://carto.com/attributions">CARTO</a>' }
-    },
-    dark: {
-      url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-      options: { maxZoom: 20, subdomains: "abcd", attribution: '&copy; OpenStreetMap contributors &copy; <a href="https://carto.com/attributions">CARTO</a>' }
-    }
-  };
-  const source = sources[layerName];
-  if (!source) return;
-  if (activeBaseLayer) map.removeLayer(activeBaseLayer);
-  activeBaseLayer = L.tileLayer(source.url, source.options).addTo(map);
-  activeBaseLayer.on("tileerror", () => {
-    window.dispatchEvent(new CustomEvent("smartmap:toast", {
-      detail: "Some map tiles could not load. Check your connection or choose another map style."
-    }));
+  if (!map || !MAP_STYLES[layerName]) return;
+  if (layerName === activeStyle) {
+    if (map.isStyleLoaded()) applyLabelPreference();
+    return;
+  }
+  activeStyle = layerName;
+  const style = MAP_STYLES[layerName];
+  map.setStyle(style.url);
+  map.once("style.load", () => {
+    applyLabelPreference();
+    window.dispatchEvent(new CustomEvent("smartmap:stylechange", { detail: layerName }));
   });
 }
 
 export function addPoiMarker(lat, lon, title, category, details = "") {
-  const icon = L.divIcon({
-    className: "smartmap-marker-wrap",
-    html: `<span class="smartmap-marker ${escapeHtml(category)}"><i class="fa-solid ${iconForCategory(category)}"></i></span>`,
-    iconSize: [32, 32],
-    iconAnchor: [16, 16]
-  });
-  const marker = L.marker([lat, lon], { icon }).addTo(poiLayer);
-  marker.bindPopup(`<strong>${escapeHtml(title)}</strong>${details ? `<br><small>${escapeHtml(details)}</small>` : ""}`);
-  marker.on("click", () => {
+  const element = document.createElement("div");
+  element.className = `smartmap-marker ${escapeHtml(category)}`;
+  element.setAttribute("role", "button");
+  element.setAttribute("aria-label", title);
+  element.innerHTML = `<i class="fa-solid ${iconForCategory(category)}"></i>`;
+  const popup = new maplibregl.Popup({ offset: 18, closeButton: true }).setHTML(
+    `<strong>${escapeHtml(title)}</strong>${details ? `<br><small>${escapeHtml(details)}</small>` : ""}`
+  );
+  const marker = new maplibregl.Marker({ element, anchor: "bottom" })
+    .setLngLat([Number(lon), Number(lat)])
+    .setPopup(popup)
+    .addTo(map);
+  element.addEventListener("click", () => {
     window.dispatchEvent(new CustomEvent("smartmap:place", {
-      detail: { name: title, address: details, lat, lon }
+      detail: { name: title, address: details, lat: Number(lat), lon: Number(lon) }
     }));
   });
+  poiMarkers.push(marker);
   return marker;
 }
 
 export function clearPoiMarkers() {
-  if (poiLayer) poiLayer.clearLayers();
+  poiMarkers.forEach(marker => marker.remove());
+  poiMarkers = [];
 }
 
 export function selectLocation(lat, lon, name = "Selected location", address = "") {
   if (!map) return;
-  if (selectedMarker) map.removeLayer(selectedMarker);
-  selectedMarker = L.marker([lat, lon]).addTo(map);
-  selectedMarker.bindPopup(`<strong>${escapeHtml(name)}</strong>`).openPopup();
+  if (selectedMarker) selectedMarker.remove();
+  const element = document.createElement("div");
+  element.className = "selected-location-marker";
+  element.innerHTML = '<i class="fa-solid fa-location-dot"></i>';
+  selectedMarker = new maplibregl.Marker({ element, anchor: "bottom" })
+    .setLngLat([Number(lon), Number(lat)])
+    .setPopup(new maplibregl.Popup({ offset: 24 }).setHTML(`<strong>${escapeHtml(name)}</strong>`))
+    .addTo(map);
+  selectedMarker.togglePopup();
   window.dispatchEvent(new CustomEvent("smartmap:place", {
-    detail: { name, address, lat, lon }
+    detail: { name, address, lat: Number(lat), lon: Number(lon) }
   }));
 }
 
@@ -143,25 +186,28 @@ export function showSelectedCoordinates(lat, lon) {
 
 export function setUserLocation(lat, lon) {
   if (!map) return;
-  if (userMarker) map.removeLayer(userMarker);
-  const icon = L.divIcon({
-    className: "user-marker-wrap",
-    html: '<span class="user-marker"><span></span></span>',
-    iconSize: [24, 24],
-    iconAnchor: [12, 12]
-  });
-  userMarker = L.marker([lat, lon], { icon, zIndexOffset: 1000 }).addTo(map);
-  userMarker.bindPopup("Your approximate location");
+  if (userMarker) userMarker.remove();
+  const element = document.createElement("div");
+  element.className = "user-marker";
+  element.innerHTML = "<span></span>";
+  userMarker = new maplibregl.Marker({ element, anchor: "center" })
+    .setLngLat([Number(lon), Number(lat)])
+    .setPopup(new maplibregl.Popup({ offset: 14 }).setText("Your current location"))
+    .addTo(map);
   flyToLocation(lat, lon, 15);
 }
 
-export function zoomIn() { if (map) map.zoomIn(1); }
-export function zoomOut() { if (map) map.zoomOut(1); }
-export function resetView() { if (map) flyToLocation(DEFAULT_CENTER[0], DEFAULT_CENTER[1], 5); }
+export function zoomIn() { if (map) map.zoomIn({ duration: smoothMotion ? 250 : 0 }); }
+export function zoomOut() { if (map) map.zoomOut({ duration: smoothMotion ? 250 : 0 }); }
+export function resetView() {
+  if (map) {
+    map.easeTo({ center: DEFAULT_CENTER, zoom: 5, bearing: 0, pitch: 0, duration: smoothMotion ? 700 : 0 });
+  }
+}
 export function resetOrientation() {
-  window.dispatchEvent(new CustomEvent("smartmap:toast", {
-    detail: "The standard 2D map has no rotation. 3D orientation requires an advanced map engine."
-  }));
+  if (!map) return;
+  map.easeTo({ bearing: 0, pitch: 0, duration: smoothMotion ? 400 : 0 });
+  window.dispatchEvent(new CustomEvent("smartmap:toast", { detail: "Map orientation reset to north." }));
 }
 
 export function makeMapLink(lat, lon, zoom = map?.getZoom() || 12) {
@@ -171,7 +217,7 @@ export function makeMapLink(lat, lon, zoom = map?.getZoom() || 12) {
 export function readMapLink() {
   const match = location.hash.match(/map=(\d+(?:\.\d+)?)\/(-?\d+(?:\.\d+)?)\/(-?\d+(?:\.\d+)?)/);
   if (match && map) {
-    map.setView([Number(match[2]), Number(match[3])], Number(match[1]));
+    map.jumpTo({ center: [Number(match[3]), Number(match[2])], zoom: Number(match[1]) });
   }
 }
 
